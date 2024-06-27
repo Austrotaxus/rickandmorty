@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "rickandmorty"
+version = "0.1.0"
+description = ""
+authors = ["Sergey Koziniy <sergey.koziniy@gmail.com>"]
+readme = "README.md"
+license = "MIT"
+
+
+[tool.poetry.dependencies]
+python = "^3.12"
+backoff = "^2.2.1"
+requests = "^2.32.3"
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.4.2"
+isort = "^5.13.2"
+ruff = "^0.5.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
