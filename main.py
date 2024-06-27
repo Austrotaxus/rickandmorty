@@ -1,6 +1,7 @@
 import json
 import logging
 import uuid
+from abc import ABC
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -48,42 +49,51 @@ class Episode:
     created: str
 
 
-ENDPOINT_TO_CLS = {
-    "episode": Episode,
-    "character": Character,
-    "location": Location,
-}
-
-
-class APILoader:
+class APILoader(ABC):
     """Iterate over pages."""
 
-    def __init__(self, endpoint: str, get: Callable):
-        self.endpoint = endpoint
-        self.get = get
+    @backoff.on_exception(backoff.expo, requests.exceptions.RequestException)
+    def get(self, url):
+        return requests.get(url).json()
+
+    def __init__(self):
         self.request_url = Request(self.endpoint)
-        self.record_cls = ENDPOINT_TO_CLS[endpoint]
 
     def __iter__(self):
         while self.request_url:
             result = self.get(self.request_url)
             self.request_url = result["info"]["next"]
-            yield from Page(**result, record_cls=self.record_cls)
+            yield from Page(**result, record_factory=self.record_factory)
+
+
+class CharacterAPILoader(APILoader):
+    endpoint = "character"
+    record_factory = Character
+
+
+class EpisodeAPILoader(APILoader):
+    endpoint = "episode"
+    record_factory = Episode
+
+
+class LocationAPILoader(APILoader):
+    endpoint = "location"
+    record_factory = Location
 
 
 class Page:
     "Represent page of API response"
 
-    def __init__(self, info: dict, results: List[dict], record_cls):
+    def __init__(self, info: dict, results: List[dict], record_factory: Callable):
         self.info = info
-        self.results = [record_cls(**record) for record in results]
+        self.results = [record_factory(**record_kwargs) for record_kwargs in results]
 
     def __iter__(self):
         return iter(self.results)
 
 
 class Request:
-    def __init__(self, endpoint: str, page=0):
+    def __init__(self, endpoint: str, page: int = 0):
         self.page = page
         page_part = f"/?page={page}"
         self.url = f"https://rickandmortyapi.com/api/{endpoint}{page_part}"
@@ -92,7 +102,7 @@ class Request:
         return self.url
 
 
-class Writer:
+class JSONFileWriter(ABC):
     root = Path("")
 
     def path(self, record: Union[Episode, Character, Location]):
@@ -118,23 +128,16 @@ class Writer:
         return record
 
 
-class EpisodeWriter(Writer):
+class EpisodeWriter(JSONFileWriter):
     directory = "episode"
 
 
-class LocationWriter(Writer):
+class LocationWriter(JSONFileWriter):
     directory = "location"
-    pass
 
 
-class CharacterWriter(Writer):
+class CharacterWriter(JSONFileWriter):
     directory = "character"
-    pass
-
-
-@backoff.on_exception(backoff.expo, requests.exceptions.RequestException)
-def get(url):
-    return requests.get(url).json()
 
 
 def pipe(producer: Iterable, consumer: Callable):
@@ -144,16 +147,16 @@ def pipe(producer: Iterable, consumer: Callable):
 
 if __name__ == "__main__":
     # Load episodes
-    for episode in pipe(APILoader("episode", get), EpisodeWriter()):
+    for episode in pipe(EpisodeAPILoader(), EpisodeWriter()):
         air_date = datetime.strptime(episode.air_date, "%B %d, %Y").date()
         name = episode.name
         if date(2017, 1, 1) <= air_date <= date(2021, 12, 31) and len(name) > 3:
             print(episode)
 
     # Load locations
-    all(pipe(APILoader("location", get), LocationWriter()))
+    all(pipe(LocationAPILoader(), LocationWriter()))
 
     # Load characters
-    for character in pipe(APILoader("character", get), CharacterWriter()):
+    for character in pipe(CharacterAPILoader(), CharacterWriter()):
         if all(int(episode[-1]) % 2 == 1 for episode in character.episode):
             print(character)
